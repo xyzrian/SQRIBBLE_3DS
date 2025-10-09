@@ -57,14 +57,18 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lctru -lm
+INCLUDES := -I$(DEVKITPRO)/libctru/include
+LIBS	:= -lcitro3d -lctru -lm
+
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
 # include and lib
 #---------------------------------------------------------------------------------
-LIBDIRS	:= $(CTRULIB)
-
+# LIBDIRS	:= $(CTRULIB)
+# Library directories: point explicitly to libctru (headers/live libs)
+# some packages might put libs under libctru rather than a separate libcitro3d folder
+LIBDIRS := $(DEVKITPRO)/libctru $(DEVKITPRO)/libctru
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
