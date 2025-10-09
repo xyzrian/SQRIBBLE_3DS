@@ -1,4 +1,5 @@
-main.o: C:/Projects/SQRIBBLE_3DS/source/main.c \
+text.o: C:/Projects/SQRIBBLE_3DS/source/text.c \
+ C:/Projects/SQRIBBLE_3DS/source/text.h \
  C:/devkitPro/libctru/include/3ds.h \
  C:/devkitPro/libctru/include/3ds/types.h \
  C:/devkitPro/libctru/include/3ds/result.h \
@@ -84,8 +85,8 @@ main.o: C:/Projects/SQRIBBLE_3DS/source/main.c \
  C:/devkitPro/libctru/include/3ds/romfs.h \
  C:/devkitPro/libctru/include/3ds/font.h \
  C:/devkitPro/libctru/include/3ds/gdbhio_dev.h \
- C:/devkitPro/libctru/include/3ds/3dslink.h \
- C:/Projects/SQRIBBLE_3DS/source/text.h
+ C:/devkitPro/libctru/include/3ds/3dslink.h
+C:/Projects/SQRIBBLE_3DS/source/text.h:
 C:/devkitPro/libctru/include/3ds.h:
 C:/devkitPro/libctru/include/3ds/types.h:
 C:/devkitPro/libctru/include/3ds/result.h:
@@ -172,4 +173,3 @@ C:/devkitPro/libctru/include/3ds/romfs.h:
 C:/devkitPro/libctru/include/3ds/font.h:
 C:/devkitPro/libctru/include/3ds/gdbhio_dev.h:
 C:/devkitPro/libctru/include/3ds/3dslink.h:
-C:/Projects/SQRIBBLE_3DS/source/text.h:
