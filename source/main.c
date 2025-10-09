@@ -373,11 +373,11 @@ void drawInstructions(u8* framebuffer) {
     drawString(framebuffer, "L/R: Undo/Redo", 10, 130, 255, 255, 255);
     drawString(framebuffer, "D-Pad Up/Down: Brush Size", 10, 140, 255, 255, 255);
     drawString(framebuffer, "D-Pad L/R: Cycle Primary Color", 10, 150, 255, 255, 255);
-    drawString(framebuffer, "B: Cycle canvas style", 10, 160, 255, 255, 255);
-    drawString(framebuffer, "X: Clear canvas", 10, 170, 255, 255, 255);
-    drawString(framebuffer, "Y: Save screenshot", 10, 180, 255, 255, 255);
-    drawString(framebuffer, "Circle Pad: 3D depth", 10, 190, 255, 255, 255);
-    drawString(framebuffer, "SELECT: Cycle Brush shape", 10, 200, 255, 255, 255);
+    drawString(framebuffer, "A: Cycle Brush shape", 10, 160, 255, 255, 255);
+    drawString(framebuffer, "B: Cycle canvas style", 10, 170, 255, 255, 255);
+    drawString(framebuffer, "X: Clear canvas", 10, 180, 255, 255, 255);
+    drawString(framebuffer, "Y: Save screenshot", 10, 190, 255, 255, 255);
+    drawString(framebuffer, "Circle Pad: 3D depth", 10, 200, 255, 255, 255);
     drawString(framebuffer, "START: Toggle help", 10, 210, 255, 255, 255);
     
     // Prompt near bottom
@@ -522,8 +522,8 @@ int main(int argc, char **argv) {
                 generateRotatedCheckerboard(rotatedImage, 20);
             }
 
-            // SELECT button: Cycle through brush shapes
-            if (kDown & KEY_SELECT) {
+            // A button: Cycle through brush shapes
+            if (kDown & KEY_A) {
                 currentBrushShape = (BrushShape)((currentBrushShape + 1) % 3);
             }
 
