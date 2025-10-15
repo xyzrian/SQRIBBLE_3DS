@@ -31,6 +31,10 @@ include $(DEVKITARM)/3ds_rules
 #     - icon.png
 #     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
+APP_TITLE := SQRIBBLE 3DS
+APP_AUTHOR := soberdosing
+APP_DESCRIPTION  := 3D Drawing Application
+ICON 		:= icon.png
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
 SOURCES		:=	source
@@ -93,6 +97,8 @@ PICAFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))
 SHLISTFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.shlist)))
 GFXFILES	:=	$(foreach dir,$(GRAPHICS),$(notdir $(wildcard $(dir)/*.t3s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
+
+
 
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C

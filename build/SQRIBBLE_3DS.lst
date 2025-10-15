@@ -433,32 +433,32 @@
 0011c998 00000048 T strrchr
 0011c9e0 T _fini
 0011d008 0000027d r font
-0011d4c8 r .LC2
-0011d62c 00000008 r morton_y.2
-0011d634 00000008 r morton_x.3
-0011d63c 00000008 r s_sleepWakeEvents.4
-0011d644 0000000c r serviceNameTable.5
-0011d650 00000030 r error_table
-0011d680 00000080 r archive_devoptab
-0011d828 00000010 r zeroes.0
-0011d838 00000010 r blanks.1
-0011d848 00000101 R _ctype_
-0011d94c 0000006c R __action_table
-0011d9b8 0000006c R __state_table
-0011da24 00000100 R __chclass
-0011db2c 0000000c r p05.0
-0011db38 00000028 R __mprec_bigtens
-0011db60 000000c8 R __mprec_tens
-0011dc28 00000060 R __month_lengths
-0011dd74 00000010 r zeroes.0
-0011dd84 00000010 r blanks.1
-0011de14 00000022 r basefix.0
-0011de38 000035dc r categories
-00121414 00000080 R dotab_stdnull
-00121494 R __tdata_align
-00121498 r __EH_FRAME_BEGIN__
-00121498 R __exidx_end
-00121498 R __exidx_start
+0011d4cc r .LC2
+0011d630 00000008 r morton_y.2
+0011d638 00000008 r morton_x.3
+0011d640 00000008 r s_sleepWakeEvents.4
+0011d648 0000000c r serviceNameTable.5
+0011d654 00000030 r error_table
+0011d684 00000080 r archive_devoptab
+0011d82c 00000010 r zeroes.0
+0011d83c 00000010 r blanks.1
+0011d84c 00000101 R _ctype_
+0011d950 0000006c R __action_table
+0011d9bc 0000006c R __state_table
+0011da28 00000100 R __chclass
+0011db30 0000000c r p05.0
+0011db40 00000028 R __mprec_bigtens
+0011db68 000000c8 R __mprec_tens
+0011dc30 00000060 R __month_lengths
+0011dd7c 00000010 r zeroes.0
+0011dd8c 00000010 r blanks.1
+0011de1c 00000022 r basefix.0
+0011de40 000035dc r categories
+0012141c 00000080 R dotab_stdnull
+0012149c R __tdata_align
+001214a0 r __EH_FRAME_BEGIN__
+001214a0 R __exidx_end
+001214a0 R __exidx_start
 00122000 00000012 D rainbowColors
 00122012 00000001 D currentMode
 00122013 00000001 D showInstructions
