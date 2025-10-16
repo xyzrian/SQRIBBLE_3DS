@@ -1,10 +1,11 @@
 #include <3ds.h>
+#include <citro2d.h>
+#include <citro3d.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
-#include "text.h"  
 
 // Screen dimensions - 3DS has 320x240 bottom screen, 400x240 top screen
 #define SCREEN_WIDTH 320
@@ -13,6 +14,7 @@
 #define FB_HEIGHT 320     // Framebuffer height (rotated 90°)
 
 #define MAX_HISTORY 20    // Maximum number of undo/redo steps to store
+#define MAX_INSTRUCTION_LINES 14  // Number of text lines in instructions
 
 // Three framebuffers store different visual layers:
 // 1. baseImage: The "top" layer that gets scratched away
@@ -27,6 +29,12 @@ u8 undoStack[MAX_HISTORY][FB_WIDTH * FB_HEIGHT];
 u8 redoStack[MAX_HISTORY][FB_WIDTH * FB_HEIGHT];
 int undoTop = 0;  // Points to next available undo slot
 int redoTop = 0;  // Points to next available redo slot
+
+// Citro2D render targets and text buffers
+static C3D_RenderTarget* topTarget;
+static C3D_RenderTarget* bottomTarget;
+static C2D_TextBuf staticTextBuf;
+static C2D_Text instructionTexts[MAX_INSTRUCTION_LINES];
 
 // RGB color structure for easy color management
 typedef struct {
@@ -65,7 +73,6 @@ typedef enum {
 BrushShape currentBrushShape = BRUSH_CIRCLE;
 
 bool allowDrawing = false;
-
 bool showInstructions = true;     // Show instruction screen on startup
 float depthOffset = 3.0f;         // 3D stereoscopic depth offset
 
@@ -343,45 +350,115 @@ void drawLine(int x0, int y0, int x1, int y1, int brushSize) {
     }
 }
 
+/**
+ * CITRO2D INSTRUCTION SCREEN INITIALIZATION
+ * 
+ * Pre-parse all static instruction text once for efficient repeated rendering.
+ * Text is optimized after parsing to improve GPU performance.
+ */
+void initInstructionText() {
+    // Parse each line of instruction text
+    C2D_TextParse(&instructionTexts[0], staticTextBuf, "SQRIBBLE 3DS");
+    C2D_TextOptimize(&instructionTexts[0]);
+    
+    C2D_TextParse(&instructionTexts[1], staticTextBuf, "v1.0");
+    C2D_TextOptimize(&instructionTexts[1]);
+    
+    C2D_TextParse(&instructionTexts[2], staticTextBuf, "BASIC CONTROLS:");
+    C2D_TextOptimize(&instructionTexts[2]);
+    
+    C2D_TextParse(&instructionTexts[3], staticTextBuf, "Touch: Draw");
+    C2D_TextOptimize(&instructionTexts[3]);
+    
+    C2D_TextParse(&instructionTexts[4], staticTextBuf, "L/R: Undo/Redo");
+    C2D_TextOptimize(&instructionTexts[4]);
+    
+    C2D_TextParse(&instructionTexts[5], staticTextBuf, "D-Pad Up/Down: brush size");
+    C2D_TextOptimize(&instructionTexts[5]);
+    
+    C2D_TextParse(&instructionTexts[6], staticTextBuf, "D-Pad L/R: Cycle primary color");
+    C2D_TextOptimize(&instructionTexts[6]);
+    
+    C2D_TextParse(&instructionTexts[7], staticTextBuf, "A: Cycle Brush shape");
+    C2D_TextOptimize(&instructionTexts[7]);
+    
+    C2D_TextParse(&instructionTexts[8], staticTextBuf, "B: Cycle canvas style");
+    C2D_TextOptimize(&instructionTexts[8]);
+    
+    C2D_TextParse(&instructionTexts[9], staticTextBuf, "X: Clear canvas");
+    C2D_TextOptimize(&instructionTexts[9]);
+    
+    C2D_TextParse(&instructionTexts[10], staticTextBuf, "Y: Save screenshot");
+    C2D_TextOptimize(&instructionTexts[10]);
+    
+    C2D_TextParse(&instructionTexts[11], staticTextBuf, "Circle Pad: 3D depth");
+    C2D_TextOptimize(&instructionTexts[11]);
+    
+    C2D_TextParse(&instructionTexts[12], staticTextBuf, "START: Toggle help");
+    C2D_TextOptimize(&instructionTexts[12]);
+    
+    C2D_TextParse(&instructionTexts[13], staticTextBuf, "Press any button to begin!");
+    C2D_TextOptimize(&instructionTexts[13]);
+}
 
 /**
- * INSTRUCTION SCREEN
+ * CITRO2D INSTRUCTION SCREEN RENDERER
  * 
- * Draw help screen with controls and game info.
- * Uses gradient background and colored text for visual hierarchy.
- * Coordinates are inverted due to framebuffer rotation.
+ * GPU-accelerated instruction screen using Citro2D text rendering.
+ * Uses pre-parsed text objects with color formatting and scaling.
  */
-void drawInstructions(u8* framebuffer) {
-    // Fill with dark gray background
-    for (int x = 0; x < 320; x++) {
-        for (int y = 0; y < 240; y++) {
-            u8 gradientValue = 70;  // Dark gray
-            int offset = (x * FB_WIDTH + (FB_HEIGHT - 1 - y)) * 3;
-            framebuffer[offset + 0] = gradientValue;      // B
-            framebuffer[offset + 1] = gradientValue;      // G
-            framebuffer[offset + 2] = gradientValue;      // R
-        }
+void drawInstructionsGPU() {
+    // Begin frame and target bottom screen
+    C2D_TargetClear(bottomTarget, C2D_Color32(70, 70, 70, 255));  // Dark gray background
+    C2D_SceneBegin(bottomTarget);
+    
+    // Title - large, centered, yellow
+    float titleScale = 1.0f;
+    C2D_DrawText(&instructionTexts[0], C2D_WithColor, 
+                 70.0f, 10.0f, 0.5f,   // x, y, z-depth
+                 titleScale, titleScale,
+                 C2D_Color32(255, 255, 100, 255));  // Yellow
+    
+    // Version - smaller, gray
+    C2D_DrawText(&instructionTexts[1], C2D_WithColor,
+                 275.0f, 20.0f, 0.5f,
+                 0.5f, 0.5f,
+                 C2D_Color32(150, 150, 150, 255));  // Gray
+    
+    // Section header - yellow
+    C2D_DrawText(&instructionTexts[2], C2D_WithColor,
+                 10.0f, 50.0f, 0.5f,
+                 0.65f, 0.65f,
+                 C2D_Color32(255, 255, 100, 255));
+    
+    // Control lines - white, smaller
+    float yPos = 70.0f;
+    float lineSpacing = 14.0f;
+    float controlScale = 0.5f;
+    
+    for (int i = 3; i < 13; i++) {  // Lines 3-12 are controls
+        C2D_DrawText(&instructionTexts[i], C2D_WithColor,
+                     10.0f, yPos, 0.5f,
+                     controlScale, controlScale,
+                     C2D_Color32(255, 255, 255, 255));  // White
+        yPos += lineSpacing;
     }
     
-    // Title and Instructions 
-    // y_framebuffer = 319 - y 
-    drawString(framebuffer, "SQRIBBLE 3DS", 120, 90, 100, 255, 255); //x, y - FIX drawChar offset 
-    drawString(framebuffer, "v1.0", 280, 90, 150, 150, 150);
-    
-    drawString(framebuffer, "BASIC CONTROLS:", 10, 110, 255, 255, 100);
-    drawString(framebuffer, "Touch: Draw", 10, 120, 255, 255, 255);
-    drawString(framebuffer, "L/R: Undo/Redo", 10, 130, 255, 255, 255);
-    drawString(framebuffer, "D-Pad Up/Down: Brush Size", 10, 140, 255, 255, 255);
-    drawString(framebuffer, "D-Pad L/R: Cycle Primary Color", 10, 150, 255, 255, 255);
-    drawString(framebuffer, "A: Cycle Brush shape", 10, 160, 255, 255, 255);
-    drawString(framebuffer, "B: Cycle canvas style", 10, 170, 255, 255, 255);
-    drawString(framebuffer, "X: Clear canvas", 10, 180, 255, 255, 255);
-    drawString(framebuffer, "Y: Save screenshot", 10, 190, 255, 255, 255);
-    drawString(framebuffer, "Circle Pad: 3D depth", 10, 200, 255, 255, 255);
-    drawString(framebuffer, "START: Toggle help", 10, 210, 255, 255, 255);
-    
-    // Prompt near bottom
-    drawString(framebuffer, "Press any button to begin!", 80, 230, 100, 255, 255);
+    // Prompt at bottom - cyan
+    C2D_DrawText(&instructionTexts[13], C2D_WithColor,
+                 50.0f, 220.0f, 0.5f,
+                 0.6f, 0.6f,
+                 C2D_Color32(100, 255, 255, 255));  // Cyan
+
+     
+    // Also show instructions on top screen
+    C2D_TargetClear(topTarget, C2D_Color32(70, 70, 70, 255));
+    C2D_SceneBegin(topTarget);
+    // Top screen can show title or logo
+    C2D_DrawText(&instructionTexts[0], C2D_WithColor, 
+                    70.0f, 100.0f, 0.5f, // x, y z
+                    1.5f, 1.5f,
+                    C2D_Color32(255, 255, 100, 255));
 }
 
 /**
@@ -454,7 +531,7 @@ bool saveScreenshot(u8* framebuffer) {
  * MAIN PROGRAM
  * 
  * Game loop structure:
- * 1. Initialize graphics and 3D
+ * 1. Initialize graphics, Citro2D, and 3D
  * 2. Generate initial patterns
  * 3. Main loop: Process input, update state, render
  * 4. Cleanup and exit
@@ -462,6 +539,19 @@ bool saveScreenshot(u8* framebuffer) {
 int main(int argc, char **argv) {
     gfxInitDefault();
     gfxSet3D(true);  // Enable stereoscopic 3D rendering
+    
+    // Initialize Citro3D and Citro2D for GPU-accelerated rendering
+    C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
+    C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
+    C2D_Prepare();
+    
+    // Create render targets for each screen
+    topTarget = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
+    bottomTarget = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
+    
+    // Create text buffer and initialize instruction text
+    staticTextBuf = C2D_TextBufNew(4096);
+    initInstructionText();
 
     // Generate initial checkerboard patterns (20px cells)
     generateCheckerboard(baseImage, 20);
@@ -471,10 +561,6 @@ int main(int argc, char **argv) {
     // Allocate working buffers for rendering
     u8* compositeBuffer = (u8*)malloc(FB_WIDTH * FB_HEIGHT * 3);
     u8* topScreenBuffer = (u8*)malloc(240 * 400 * 3);
-    u8* instructionBuffer = (u8*)malloc(FB_WIDTH * FB_HEIGHT * 3);
-    
-    // Pre-render instruction screen (only drawn once)
-    drawInstructions(instructionBuffer);
     
     int brushSize = 5;
     bool wasTouching = false;
@@ -484,15 +570,11 @@ int main(int argc, char **argv) {
         hidScanInput();
         u32 kDown = hidKeysDown();   // Buttons pressed this frame
         u32 kHeld = hidKeysHeld();   // Buttons held down
-        // u32 kUp = hidKeysUp();       // Buttons released this frame
 
         // START button toggles help screen on/off
         if (kDown & KEY_START) {
             showInstructions = !showInstructions;
             allowDrawing = !showInstructions;
-            if (showInstructions) {
-                drawInstructions(instructionBuffer);
-            }
         }
 
         // Any button press dismisses instruction screen
@@ -530,7 +612,6 @@ int main(int argc, char **argv) {
             // Y button: Save screenshot to SD card
             if (kDown & KEY_Y) {
                 saveScreenshot(compositeBuffer);
-                // Could add visual feedback here (flash, message, etc.)
             }
 
             // D-Pad Right: Next color in rainbow palette
@@ -610,65 +691,78 @@ int main(int argc, char **argv) {
 
         // RENDERING PIPELINE
         
-        // Step 1: Composite the two layers based on scratch mask
-        // (Rotated layer below, base layer above)
-        compositeImage(compositeBuffer, rotatedImage, baseImage, scratchMask);
-
-        // Step 2: Render to bottom screen (touch screen)
-        u8* fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
         if (showInstructions) {
-            // Show instruction screen
-            memcpy(fbBottom, instructionBuffer, FB_WIDTH * FB_HEIGHT * 3);
+            // Begin Citro3D frame for GPU rendering
+            C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+            
+            // Render GPU-accelerated instruction screen to bottom
+            drawInstructionsGPU();
+        
+            
+            // End frame and display
+            C3D_FrameEnd(0);
         } else {
-            // Show drawing canvas
+            // Use traditional framebuffer rendering for game canvas
+            // Step 1: Composite the two layers based on scratch mask
+            compositeImage(compositeBuffer, rotatedImage, baseImage, scratchMask);
+
+            // Step 2: Render to bottom screen (touch screen) using framebuffer
+            u8* fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
             memcpy(fbBottom, compositeBuffer, FB_WIDTH * FB_HEIGHT * 3);
-        }
 
-        // Step 3: Render to top screen left eye (center 320px in 400px screen)
-        u8* fbTopLeft = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-        memset(topScreenBuffer, 0, 240 * 400 * 3);  // Black bars on sides
-        for (int x = 0; x < 320; x++) {
-            for (int y = 0; y < 240; y++) {
-                int srcIdx = (x * 240 + (239 - y)) * 3;
-                int dstX = x + 40;  // Center horizontally (40px black border each side)
-                int dstIdx = (dstX * 240 + (239 - y)) * 3;
-                memcpy(&topScreenBuffer[dstIdx], &compositeBuffer[srcIdx], 3);
-            }
-        }
-        memcpy(fbTopLeft, topScreenBuffer, 240 * 400 * 3);
-
-        // Step 4: Render to top screen right eye with parallax for 3D effect
-        u8* fbTopRight = gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
-        memset(topScreenBuffer, 0, 240 * 400 * 3);
-        for (int x = 0; x < 320; x++) {
-            for (int y = 0; y < 240; y++) {
-                int srcIdx = (x * 240 + (239 - y)) * 3;
-                int maskIdx = x * 240 + (239 - y);
-                u8 alpha = scratchMask[maskIdx];
-                
-                // Apply horizontal shift based on scratch state
-                // Scratched areas (low alpha): base depth
-                // Unscratched areas (high alpha): shifted by depthOffset for 3D pop
-                int dstX = (alpha > 128 ? x + 40 + (int)depthOffset : x + 40);
-                
-                if (dstX >= 0 && dstX < 400) {
+            // Step 3: Render to top screen left eye (center 320px in 400px screen)
+            u8* fbTopLeft = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+            memset(topScreenBuffer, 0, 240 * 400 * 3);  // Black bars on sides
+            for (int x = 0; x < 320; x++) {
+                for (int y = 0; y < 240; y++) {
+                    int srcIdx = (x * 240 + (239 - y)) * 3;
+                    int dstX = x + 40;  // Center horizontally (40px black border each side)
                     int dstIdx = (dstX * 240 + (239 - y)) * 3;
                     memcpy(&topScreenBuffer[dstIdx], &compositeBuffer[srcIdx], 3);
                 }
             }
-        }
-        memcpy(fbTopRight, topScreenBuffer, 240 * 400 * 3);
+            memcpy(fbTopLeft, topScreenBuffer, 240 * 400 * 3);
 
-        // Display rendered frames and wait for next frame
-        gfxFlushBuffers();
-        gfxSwapBuffers();
+            // Step 4: Render to top screen right eye with parallax for 3D effect
+            u8* fbTopRight = gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
+            memset(topScreenBuffer, 0, 240 * 400 * 3);
+            for (int x = 0; x < 320; x++) {
+                for (int y = 0; y < 240; y++) {
+                    int srcIdx = (x * 240 + (239 - y)) * 3;
+                    int maskIdx = x * 240 + (239 - y);
+                    u8 alpha = scratchMask[maskIdx];
+                    
+                    // Apply horizontal shift based on scratch state
+                    // Scratched areas (low alpha): base depth
+                    // Unscratched areas (high alpha): shifted by depthOffset for 3D pop
+                    int dstX = (alpha > 128 ? x + 40 + (int)depthOffset : x + 40);
+                    
+                    if (dstX >= 0 && dstX < 400) {
+                        int dstIdx = (dstX * 240 + (239 - y)) * 3;
+                        memcpy(&topScreenBuffer[dstIdx], &compositeBuffer[srcIdx], 3);
+                    }
+                }
+            }
+            memcpy(fbTopRight, topScreenBuffer, 240 * 400 * 3);
+            
+            // Flush framebuffers for non-Citro rendering
+            gfxFlushBuffers();
+            gfxSwapBuffers();
+        }
+        
+        // VSync wait
         gspWaitForVBlank();  // Sync to 60fps
     }
 
-    // Cleanup: Free allocated memory and exit graphics
+    // Cleanup: Free allocated memory and exit
     free(compositeBuffer);
     free(topScreenBuffer);
-    free(instructionBuffer);
+    
+    // Cleanup Citro2D/3D
+    C2D_TextBufDelete(staticTextBuf);
+    C2D_Fini();
+    C3D_Fini();
+    
     gfxExit();
     return 0;
 }

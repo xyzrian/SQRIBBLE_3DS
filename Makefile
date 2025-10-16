@@ -62,7 +62,7 @@ ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
 INCLUDES := -I$(DEVKITPRO)/libctru/include
-LIBS	:= -lcitro3d -lctru -lm
+LIBS	:= -lcitro2d -lcitro3d -lctru -lm
 
 
 #---------------------------------------------------------------------------------
