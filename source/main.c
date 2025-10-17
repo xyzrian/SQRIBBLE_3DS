@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
+#include <tex3ds.h>
 
 // Screen dimensions - 3DS has 320x240 bottom screen, 400x240 top screen
 #define SCREEN_WIDTH 320
@@ -29,6 +30,10 @@ u8 undoStack[MAX_HISTORY][FB_WIDTH * FB_HEIGHT];
 u8 redoStack[MAX_HISTORY][FB_WIDTH * FB_HEIGHT];
 int undoTop = 0;  // Points to next available undo slot
 int redoTop = 0;  // Points to next available redo slot
+
+static C2D_SpriteSheet spriteSheet;
+static C2D_Image logoImage;
+static bool logoLoaded = false;
 
 // Citro2D render targets and text buffers
 static C3D_RenderTarget* topTarget;
@@ -123,6 +128,32 @@ void redo() {
         // Restore next state
         memcpy(scratchMask, redoStack[--redoTop], sizeof(scratchMask));
     }
+}
+
+/**
+ * Load logo sprite sheet from romfs
+ * Place your logo.t3x file in romfs/gfx/
+ * Returns true if successful
+ */
+bool loadLogo() {
+    // Initialize romfs (file system for embedded resources)
+    Result rc = romfsInit();
+    if (R_FAILED(rc)) {
+        return false;
+    }
+    
+    // Load sprite sheet from romfs
+    spriteSheet = C2D_SpriteSheetLoad("romfs:/gfx/menu.t3x");
+    if (!spriteSheet) {
+        romfsExit();
+        return false;
+    }
+    
+    // Get first image from sprite sheet (index 0)
+    logoImage = C2D_SpriteSheetGetImage(spriteSheet, 0);
+    logoLoaded = true;
+    
+    return true;
 }
 
 /**
@@ -373,7 +404,7 @@ void initInstructionText() {
     C2D_TextParse(&instructionTexts[4], staticTextBuf, "L/R: Undo/Redo");
     C2D_TextOptimize(&instructionTexts[4]);
     
-    C2D_TextParse(&instructionTexts[5], staticTextBuf, "D-Pad Up/Down: brush size");
+    C2D_TextParse(&instructionTexts[5], staticTextBuf, "D-Pad Up/Down: Brush size");
     C2D_TextOptimize(&instructionTexts[5]);
     
     C2D_TextParse(&instructionTexts[6], staticTextBuf, "D-Pad L/R: Cycle primary color");
@@ -408,32 +439,61 @@ void initInstructionText() {
  * Uses pre-parsed text objects with color formatting and scaling.
  */
 void drawInstructionsGPU() {
-    // Begin frame and target bottom screen
-    C2D_TargetClear(bottomTarget, C2D_Color32(70, 70, 70, 255));  // Dark gray background
-    C2D_SceneBegin(bottomTarget);
+     // Target top screen "SQRIBBLE 3DS" - ver
+    C2D_TargetClear(topTarget, C2D_Color32(0,0,0,0)); // black
+    C2D_SceneBegin(topTarget);
     
-    // Title - large, centered, yellow
-    float titleScale = 1.0f;
-    C2D_DrawText(&instructionTexts[0], C2D_WithColor, 
-                 70.0f, 10.0f, 0.5f,   // x, y, z-depth
-                 titleScale, titleScale,
-                 C2D_Color32(255, 255, 100, 255));  // Yellow
-    
-    // Version - smaller, gray
-    C2D_DrawText(&instructionTexts[1], C2D_WithColor,
-                 275.0f, 20.0f, 0.5f,
+     if (logoLoaded) {
+        // Top screen is 400x240
+        float logoWidth = logoImage.subtex->width;
+        float logoHeight = logoImage.subtex->height;
+        
+        // Calculate scale to fill screen while maintaining aspect ratio
+        // float scaleX = 400.0f / logoWidth;
+        // float scaleY = 240.0f / logoHeight;
+        float scaleY = 1.0f;
+        float scaleX = 1.0f; // NO SCALE
+        
+        // Use the larger scale to ensure entire screen is covered
+        float scale = (scaleX > scaleY) ? scaleX : scaleY;
+        
+        // Calculate scaled dimensions
+        float scaledWidth = logoWidth * scale;
+        float scaledHeight = logoHeight * scale;
+        
+        // Center the oversized image (this crops edges)
+        float posX = (400.0f - scaledWidth) / 2.0f;
+        float posY = (240.0f - scaledHeight) / 2.0f;
+        
+        // Draw the logo - it will fill screen and crop if needed
+        C2D_DrawImageAt(logoImage, posX, posY, 0.5f, NULL, scale, scale);
+    } else {
+        // Fallback to text if logo didn't load
+        C2D_DrawText(&instructionTexts[0], C2D_WithColor, 
+                     65.0f, 100.0f, 0.5f,
+                     1.5f, 1.5f,
+                     C2D_Color32(255, 255, 100, 255));
+    }
+
+    // version - grey
+        C2D_DrawText(&instructionTexts[1], C2D_WithColor,
+                 370.0f, 220.0f, 0.5f,
                  0.5f, 0.5f,
                  C2D_Color32(150, 150, 150, 255));  // Gray
+        
+    // Target bottom screen
+    C2D_TargetClear(bottomTarget, C2D_Color32(0,0,0,0));  // Dark gray background
+    C2D_SceneBegin(bottomTarget);
     
-    // Section header - yellow
+    // Section header - "basic controls"
     C2D_DrawText(&instructionTexts[2], C2D_WithColor,
-                 10.0f, 50.0f, 0.5f,
-                 0.65f, 0.65f,
-                 C2D_Color32(255, 255, 100, 255));
+                 10.0f, 25.0f, 0.5f,
+                 0.6f, 0.6f, // scale
+                 C2D_Color32(65, 105, 225, 255));
     
     // Control lines - white, smaller
-    float yPos = 70.0f;
-    float lineSpacing = 14.0f;
+    float yPos = 45.0f;
+    float lineSpacing = 15.0f;
     float controlScale = 0.5f;
     
     for (int i = 3; i < 13; i++) {  // Lines 3-12 are controls
@@ -446,19 +506,11 @@ void drawInstructionsGPU() {
     
     // Prompt at bottom - cyan
     C2D_DrawText(&instructionTexts[13], C2D_WithColor,
-                 50.0f, 220.0f, 0.5f,
+                 65.0f, 215.0f, 0.5f,
                  0.6f, 0.6f,
                  C2D_Color32(100, 255, 255, 255));  // Cyan
 
-     
-    // Also show instructions on top screen
-    C2D_TargetClear(topTarget, C2D_Color32(70, 70, 70, 255));
-    C2D_SceneBegin(topTarget);
-    // Top screen can show title or logo
-    C2D_DrawText(&instructionTexts[0], C2D_WithColor, 
-                    70.0f, 100.0f, 0.5f, // x, y z
-                    1.5f, 1.5f,
-                    C2D_Color32(255, 255, 100, 255));
+    
 }
 
 /**
@@ -552,6 +604,8 @@ int main(int argc, char **argv) {
     // Create text buffer and initialize instruction text
     staticTextBuf = C2D_TextBufNew(4096);
     initInstructionText();
+
+    loadLogo();
 
     // Generate initial checkerboard patterns (20px cells)
     generateCheckerboard(baseImage, 20);
@@ -752,6 +806,12 @@ int main(int argc, char **argv) {
         
         // VSync wait
         gspWaitForVBlank();  // Sync to 60fps
+    }
+
+    // Cleanup logo resources
+    if (logoLoaded) {
+        C2D_SpriteSheetFree(spriteSheet);
+        romfsExit();
     }
 
     // Cleanup: Free allocated memory and exit
