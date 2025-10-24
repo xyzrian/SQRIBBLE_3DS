@@ -9,3 +9,4 @@ SQRIBBLE 3DS is a 3DS homebrew drawing application that allows you to draw cool 
 - Change 3D z-depth (circle pad)
 - Saving screenshot (y button)
 - Change brush styles (circle, square, feathered) (a button)
+- View gallary of screenshotted images (select button) and modify them
