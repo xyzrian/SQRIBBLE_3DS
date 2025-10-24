@@ -7,6 +7,7 @@
 #include <time.h>
 #include <math.h>
 #include <tex3ds.h>
+#include <dirent.h>
 
 // Screen dimensions - 3DS has 320x240 bottom screen, 400x240 top screen
 #define SCREEN_WIDTH 320
@@ -15,7 +16,14 @@
 #define FB_HEIGHT 320     // Framebuffer height (rotated 90°)
 
 #define MAX_HISTORY 20    // Maximum number of undo/redo steps to store
-#define MAX_INSTRUCTION_LINES 14  // Number of text lines in instructions
+#define MAX_INSTRUCTION_LINES 15  // Number of text lines in instructions
+
+// Gallery configuration
+#define MAX_GALLERY_IMAGES 50
+#define THUMBNAIL_WIDTH 80
+#define THUMBNAIL_HEIGHT 60
+#define THUMBNAILS_PER_ROW 4
+#define THUMBNAIL_SPACING 10
 
 // Three framebuffers store different visual layers:
 // 1. baseImage: The "top" layer that gets scratched away
@@ -40,6 +48,18 @@ static C3D_RenderTarget* topTarget;
 static C3D_RenderTarget* bottomTarget;
 static C2D_TextBuf staticTextBuf;
 static C2D_Text instructionTexts[MAX_INSTRUCTION_LINES];
+
+// Gallery structures
+typedef struct {
+    char filename[256];
+    u8* thumbnailData;  // RGB thumbnail data (THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT * 3)
+    bool loaded;
+} GalleryImage;
+
+GalleryImage galleryImages[MAX_GALLERY_IMAGES];
+int galleryImageCount = 0;
+int selectedGalleryIndex = 0;
+int galleryScrollOffset = 0;
 
 // RGB color structure for easy color management
 typedef struct {
@@ -79,11 +99,297 @@ BrushShape currentBrushShape = BRUSH_CIRCLE;
 
 bool allowDrawing = false;
 bool showInstructions = true;     // Show instruction screen on startup
+bool showGallery = false;         // Show gallery screen
 float depthOffset = 3.0f;         // 3D stereoscopic depth offset
 
 // Previous touch position for line interpolation (smooth drawing)
 int prevTouchX = -1;
 int prevTouchY = -1;
+
+/**
+ * GALLERY FUNCTIONS
+ */
+
+/**
+ * Simple BMP header reading to get dimensions
+ */
+bool readBMPHeader(FILE* file, u32* width, u32* height) {
+    fseek(file, 0, SEEK_SET);
+    
+    // Read magic number
+    char magic[2];
+    fread(magic, 1, 2, file);
+    if (magic[0] != 'B' || magic[1] != 'M') return false;
+    
+    // Skip to width/height (offset 18)
+    fseek(file, 18, SEEK_SET);
+    fread(width, 4, 1, file);
+    fread(height, 4, 1, file);
+    
+    return true;
+}
+
+/**
+ * Load a downsampled thumbnail from a BMP file
+ * Simple nearest-neighbor sampling for speed
+ */
+bool loadThumbnail(const char* filename, u8* thumbnailData) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) return false;
+    
+    u32 width, height;
+    if (!readBMPHeader(file, &width, &height)) {
+        fclose(file);
+        return false;
+    }
+    
+    // Calculate sampling ratios
+    float xRatio = (float)width / THUMBNAIL_WIDTH;
+    float yRatio = (float)height / THUMBNAIL_HEIGHT;
+    
+    // Allocate temporary buffer for full image row
+    u8* rowBuffer = (u8*)malloc(width * 3);
+    if (!rowBuffer) {
+        fclose(file);
+        return false;
+    }
+    
+    // BMP data starts at offset 54
+    fseek(file, 54, SEEK_SET);
+    
+    // Sample pixels for thumbnail
+    for (int thumbY = 0; thumbY < THUMBNAIL_HEIGHT; thumbY++) {
+        int srcY = (int)(thumbY * yRatio);
+        
+        // BMP stores bottom-to-top, so invert Y
+        int fileY = height - 1 - srcY;
+        fseek(file, 54 + (fileY * width * 3), SEEK_SET);
+        fread(rowBuffer, 1, width * 3, file);
+        
+        for (int thumbX = 0; thumbX < THUMBNAIL_WIDTH; thumbX++) {
+            int srcX = (int)(thumbX * xRatio);
+            int srcIdx = srcX * 3;
+            int dstIdx = (thumbY * THUMBNAIL_WIDTH + thumbX) * 3;
+            
+            // BMP is BGR, convert to RGB for easier handling
+            thumbnailData[dstIdx + 0] = rowBuffer[srcIdx + 2];  // R
+            thumbnailData[dstIdx + 1] = rowBuffer[srcIdx + 1];  // G
+            thumbnailData[dstIdx + 2] = rowBuffer[srcIdx + 0];  // B
+        }
+    }
+    
+    free(rowBuffer);
+    fclose(file);
+    return true;
+}
+
+/**
+ * Scan SD card for sqribble BMP files and load thumbnails
+ */
+void scanGalleryImages() {
+    DIR* dir = opendir("sdmc:/");
+    if (!dir) return;
+    
+    struct dirent* entry;
+    galleryImageCount = 0;
+    
+    while ((entry = readdir(dir)) != NULL && galleryImageCount < MAX_GALLERY_IMAGES) {
+        // Check if filename starts with "sqribble_" and ends with ".bmp"
+        if (strncmp(entry->d_name, "sqribble_", 9) == 0) {
+            size_t len = strlen(entry->d_name);
+            if (len > 4 && strcmp(entry->d_name + len - 4, ".bmp") == 0) {
+                // Store full path
+                snprintf(galleryImages[galleryImageCount].filename, 256, 
+                         "sdmc:/%s", entry->d_name);
+                
+                // Allocate thumbnail buffer
+                galleryImages[galleryImageCount].thumbnailData = 
+                    (u8*)malloc(THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT * 3);
+                
+                // Load thumbnail
+                galleryImages[galleryImageCount].loaded = 
+                    loadThumbnail(galleryImages[galleryImageCount].filename,
+                                galleryImages[galleryImageCount].thumbnailData);
+                
+                if (galleryImages[galleryImageCount].loaded) {
+                    galleryImageCount++;
+                } else {
+                    // Failed to load, free buffer
+                    free(galleryImages[galleryImageCount].thumbnailData);
+                }
+            }
+        }
+    }
+    
+    closedir(dir);
+}
+
+/**
+ * Free all gallery thumbnail data
+ */
+void freeGalleryImages() {
+    for (int i = 0; i < galleryImageCount; i++) {
+        if (galleryImages[i].thumbnailData) {
+            free(galleryImages[i].thumbnailData);
+            galleryImages[i].thumbnailData = NULL;
+        }
+    }
+    galleryImageCount = 0;
+}
+
+/**
+ * Load a saved drawing into the current canvas
+ */
+bool loadDrawing(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (!file) return false;
+    
+    u32 width, height;
+    if (!readBMPHeader(file, &width, &height)) {
+        fclose(file);
+        return false;
+    }
+    
+    // Only load if dimensions match (320x240)
+    if (width != 320 || height != 240) {
+        fclose(file);
+        return false;
+    }
+    
+    // Allocate temporary buffer for pixel data
+    u8* pixelData = (u8*)malloc(width * height * 3);
+    if (!pixelData) {
+        fclose(file);
+        return false;
+    }
+    
+    // Read pixel data (starting at offset 54)
+    fseek(file, 54, SEEK_SET);
+    fread(pixelData, 1, width * height * 3, file);
+    fclose(file);
+    
+    // Convert to framebuffer format
+    // BMP is stored bottom-to-top, BGR format
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            int bmpIdx = ((239 - y) * 320 + x) * 3;  // BMP bottom-to-top
+            int fbIdx = (x * 240 + (239 - y)) * 3;   // Framebuffer format
+            
+            // Copy BGR data directly (BMP and 3DS both use BGR)
+            baseImage[fbIdx + 0] = pixelData[bmpIdx + 0];  // B
+            baseImage[fbIdx + 1] = pixelData[bmpIdx + 1];  // G
+            baseImage[fbIdx + 2] = pixelData[bmpIdx + 2];  // R
+        }
+    }
+    
+    // Clear scratch mask to show loaded image
+    memset(scratchMask, 255, sizeof(scratchMask));
+    
+    free(pixelData);
+    return true;
+}
+
+/**
+ * Draw gallery thumbnails on top screen using direct framebuffer rendering
+ */
+void drawGallery(u8* framebuffer) {
+    // Clear framebuffer to dark background
+    memset(framebuffer, 20, 240 * 400 * 3);
+    
+    if (galleryImageCount == 0) {
+        // No images - could draw "No saved images" text here
+        return;
+    }
+    
+    // Calculate visible range
+    int imagesPerScreen = THUMBNAILS_PER_ROW * 2;  // 2 rows visible
+    int startIdx = galleryScrollOffset;
+    int endIdx = startIdx + imagesPerScreen;
+    if (endIdx > galleryImageCount) endIdx = galleryImageCount;
+    
+    // Draw thumbnails in grid
+    for (int i = startIdx; i < endIdx; i++) {
+        if (!galleryImages[i].loaded) continue;
+        
+        int gridIdx = i - startIdx;
+        int row = gridIdx / THUMBNAILS_PER_ROW;
+        int col = gridIdx % THUMBNAILS_PER_ROW;
+        
+        // Calculate position (centered on 400px screen)
+        int startX = 20 + col * (THUMBNAIL_WIDTH + THUMBNAIL_SPACING);
+        int startY = 60 + row * (THUMBNAIL_HEIGHT + THUMBNAIL_SPACING);
+        
+        // Draw thumbnail
+        u8* thumbData = galleryImages[i].thumbnailData;
+        for (int ty = 0; ty < THUMBNAIL_HEIGHT; ty++) {
+            for (int tx = 0; tx < THUMBNAIL_WIDTH; tx++) {
+                int thumbIdx = (ty * THUMBNAIL_WIDTH + tx) * 3;
+                
+                // Convert to framebuffer coordinates (rotated 90°)
+                int fbX = startX + tx;
+                int fbY = startY + ty;
+                int fbIdx = (fbX * 240 + (239 - fbY)) * 3;
+                
+                if (fbIdx >= 0 && fbIdx < 240 * 400 * 3 - 2) {
+                    // Convert RGB to BGR for framebuffer
+                    framebuffer[fbIdx + 0] = thumbData[thumbIdx + 2];  // B
+                    framebuffer[fbIdx + 1] = thumbData[thumbIdx + 1];  // G
+                    framebuffer[fbIdx + 2] = thumbData[thumbIdx + 0];  // R
+                }
+            }
+        }
+        
+        // Draw selection border
+        if (i == selectedGalleryIndex) {
+            // Draw cyan border around selected thumbnail
+            for (int tx = 0; tx < THUMBNAIL_WIDTH; tx++) {
+                for (int by = 0; by < 3; by++) {  // Border thickness
+                    // Top border
+                    int fbX1 = startX + tx;
+                    int fbY1 = startY + by;
+                    int fbIdx1 = (fbX1 * 240 + (239 - fbY1)) * 3;
+                    if (fbIdx1 >= 0 && fbIdx1 < 240 * 400 * 3 - 2) {
+                        framebuffer[fbIdx1 + 0] = 255;  // B
+                        framebuffer[fbIdx1 + 1] = 255;  // G
+                        framebuffer[fbIdx1 + 2] = 0;    // R (cyan)
+                    }
+                    
+                    // Bottom border
+                    int fbY2 = startY + THUMBNAIL_HEIGHT - 1 - by;
+                    int fbIdx2 = (fbX1 * 240 + (239 - fbY2)) * 3;
+                    if (fbIdx2 >= 0 && fbIdx2 < 240 * 400 * 3 - 2) {
+                        framebuffer[fbIdx2 + 0] = 255;
+                        framebuffer[fbIdx2 + 1] = 255;
+                        framebuffer[fbIdx2 + 2] = 0;
+                    }
+                }
+            }
+            
+            for (int ty = 0; ty < THUMBNAIL_HEIGHT; ty++) {
+                for (int bx = 0; bx < 3; bx++) {  // Border thickness
+                    // Left border
+                    int fbX1 = startX + bx;
+                    int fbY1 = startY + ty;
+                    int fbIdx1 = (fbX1 * 240 + (239 - fbY1)) * 3;
+                    if (fbIdx1 >= 0 && fbIdx1 < 240 * 400 * 3 - 2) {
+                        framebuffer[fbIdx1 + 0] = 255;
+                        framebuffer[fbIdx1 + 1] = 255;
+                        framebuffer[fbIdx1 + 2] = 0;
+                    }
+                    
+                    // Right border
+                    int fbX2 = startX + THUMBNAIL_WIDTH - 1 - bx;
+                    int fbIdx2 = (fbX2 * 240 + (239 - fbY1)) * 3;
+                    if (fbIdx2 >= 0 && fbIdx2 < 240 * 400 * 3 - 2) {
+                        framebuffer[fbIdx2 + 0] = 255;
+                        framebuffer[fbIdx2 + 1] = 255;
+                        framebuffer[fbIdx2 + 2] = 0;
+                    }
+                }
+            }
+        }
+    }
+}
 
 /**
  * UNDO/REDO SYSTEM
@@ -428,8 +734,11 @@ void initInstructionText() {
     C2D_TextParse(&instructionTexts[12], staticTextBuf, "START: Toggle help");
     C2D_TextOptimize(&instructionTexts[12]);
     
-    C2D_TextParse(&instructionTexts[13], staticTextBuf, "Press any button to begin!");
+    C2D_TextParse(&instructionTexts[13], staticTextBuf, "SELECT: Open gallery");
     C2D_TextOptimize(&instructionTexts[13]);
+    
+    C2D_TextParse(&instructionTexts[14], staticTextBuf, "Press any button to begin!");
+    C2D_TextOptimize(&instructionTexts[14]);
 }
 
 /**
@@ -487,16 +796,16 @@ void drawInstructionsGPU() {
     
     // Section header - "basic controls"
     C2D_DrawText(&instructionTexts[2], C2D_WithColor,
-                 10.0f, 25.0f, 0.5f,
+                 10.0f, 20.0f, 0.5f,
                  0.6f, 0.6f, // scale
                  C2D_Color32(65, 105, 225, 255));
     
     // Control lines - white, smaller
-    float yPos = 45.0f;
-    float lineSpacing = 15.0f;
+    float yPos = 38.0f;
+    float lineSpacing = 14.0f;
     float controlScale = 0.5f;
     
-    for (int i = 3; i < 13; i++) {  // Lines 3-12 are controls
+    for (int i = 3; i < 14; i++) {  // Lines 3-13 are controls
         C2D_DrawText(&instructionTexts[i], C2D_WithColor,
                      10.0f, yPos, 0.5f,
                      controlScale, controlScale,
@@ -505,12 +814,34 @@ void drawInstructionsGPU() {
     }
     
     // Prompt at bottom - cyan
-    C2D_DrawText(&instructionTexts[13], C2D_WithColor,
+    C2D_DrawText(&instructionTexts[14], C2D_WithColor,
                  65.0f, 215.0f, 0.5f,
                  0.6f, 0.6f,
                  C2D_Color32(100, 255, 255, 255));  // Cyan
+}
 
+/**
+ * Draw gallery instructions on bottom screen
+ */
+void drawGalleryInstructions(u8* framebuffer) {
+    // Fill with dark background
+    for (int i = 0; i < FB_WIDTH * FB_HEIGHT * 3; i += 3) {
+        framebuffer[i + 0] = 20;   // B
+        framebuffer[i + 1] = 20;   // G
+        framebuffer[i + 2] = 20;   // R
+    }
     
+    // Draw a colored header bar at top
+    for (int x = 0; x < 320; x++) {
+        for (int y = 0; y < 40; y++) {
+            int idx = (x * 240 + (239 - y)) * 3;
+            if (idx >= 0 && idx < FB_WIDTH * FB_HEIGHT * 3 - 2) {
+                framebuffer[idx + 0] = 225;  // B - Royal Blue
+                framebuffer[idx + 1] = 105;  // G
+                framebuffer[idx + 2] = 65;   // R
+            }
+        }
+    }
 }
 
 /**
@@ -606,6 +937,9 @@ int main(int argc, char **argv) {
     initInstructionText();
 
     loadLogo();
+    
+    // Scan for saved images on startup
+    scanGalleryImages();
 
     // Generate initial checkerboard patterns (20px cells)
     generateCheckerboard(baseImage, 20);
@@ -625,24 +959,158 @@ int main(int argc, char **argv) {
         u32 kDown = hidKeysDown();   // Buttons pressed this frame
         u32 kHeld = hidKeysHeld();   // Buttons held down
 
-        // START button toggles help screen on/off
+        // START button toggles instructions screen on/off
         if (kDown & KEY_START) {
+            if (showGallery) {
+                // If gallery is open, close it first
+                showGallery = false;
+            }
             showInstructions = !showInstructions;
-            allowDrawing = !showInstructions;
+            allowDrawing = !showInstructions && !showGallery;
         }
 
-        // Any button press dismisses instruction screen
-        if (showInstructions && kDown && (kDown != KEY_START)) {
+        // SELECT button toggles gallery screen on/off
+        if (kDown & KEY_SELECT) {
+            if (showInstructions) {
+                // If instructions are open, close them first
+                showInstructions = false;
+            }
+            showGallery = !showGallery;
+            allowDrawing = !showInstructions && !showGallery;
+            
+            // Rescan gallery when opening
+            if (showGallery) {
+                freeGalleryImages();
+                scanGalleryImages();
+                selectedGalleryIndex = 0;
+                galleryScrollOffset = 0;
+            }
+        }
+
+        // Any button press (except START/SELECT) dismisses instruction screen
+        if (showInstructions && kDown && !(kDown & KEY_START) && !(kDown & KEY_SELECT)) {
             showInstructions = false;
             allowDrawing = false;  // Don't allow drawing on the dismissal tap
         }
 
-        if (!showInstructions && !allowDrawing && !(kHeld & KEY_TOUCH)) {
+        if (!showInstructions && !showGallery && !allowDrawing && !(kHeld & KEY_TOUCH)) {
             allowDrawing = true;
         }
 
-        // Only process game controls when not showing instructions
-        if (!showInstructions) {
+        // Gallery navigation (only when showing gallery)
+        if (showGallery && galleryImageCount > 0) {
+            // D-Pad navigation
+            if (kDown & KEY_DRIGHT) {
+                selectedGalleryIndex++;
+                if (selectedGalleryIndex >= galleryImageCount) {
+                    selectedGalleryIndex = 0;
+                    galleryScrollOffset = 0;
+                } else {
+                    // Auto-scroll if selection goes off-screen
+                    int imagesPerScreen = THUMBNAILS_PER_ROW * 2;
+                    if (selectedGalleryIndex >= galleryScrollOffset + imagesPerScreen) {
+                        galleryScrollOffset = selectedGalleryIndex - imagesPerScreen + 1;
+                    }
+                }
+            }
+            
+            if (kDown & KEY_DLEFT) {
+                selectedGalleryIndex--;
+                if (selectedGalleryIndex < 0) {
+                    selectedGalleryIndex = galleryImageCount - 1;
+                    int imagesPerScreen = THUMBNAILS_PER_ROW * 2;
+                    galleryScrollOffset = (galleryImageCount > imagesPerScreen) ? 
+                                         galleryImageCount - imagesPerScreen : 0;
+                } else {
+                    // Auto-scroll if selection goes off-screen
+                    if (selectedGalleryIndex < galleryScrollOffset) {
+                        galleryScrollOffset = selectedGalleryIndex;
+                    }
+                }
+            }
+            
+            if (kDown & KEY_DDOWN) {
+                selectedGalleryIndex += THUMBNAILS_PER_ROW;
+                if (selectedGalleryIndex >= galleryImageCount) {
+                    selectedGalleryIndex = galleryImageCount - 1;
+                }
+                // Auto-scroll
+                int imagesPerScreen = THUMBNAILS_PER_ROW * 2;
+                if (selectedGalleryIndex >= galleryScrollOffset + imagesPerScreen) {
+                    galleryScrollOffset = selectedGalleryIndex - imagesPerScreen + 1;
+                }
+            }
+            
+            if (kDown & KEY_DUP) {
+                selectedGalleryIndex -= THUMBNAILS_PER_ROW;
+                if (selectedGalleryIndex < 0) {
+                    selectedGalleryIndex = 0;
+                }
+                // Auto-scroll
+                if (selectedGalleryIndex < galleryScrollOffset) {
+                    galleryScrollOffset = selectedGalleryIndex;
+                }
+            }
+            
+            // Circle Pad navigation (smoother)
+            circlePosition pos;
+            hidCircleRead(&pos);
+            
+            static int circleDelay = 0;
+            if (abs(pos.dx) > 100 || abs(pos.dy) > 100) {
+                circleDelay++;
+                if (circleDelay > 15) {  // Delay for smooth scrolling
+                    if (pos.dx > 100) {  // Right
+                        selectedGalleryIndex++;
+                        if (selectedGalleryIndex >= galleryImageCount) {
+                            selectedGalleryIndex = galleryImageCount - 1;
+                        }
+                    } else if (pos.dx < -100) {  // Left
+                        selectedGalleryIndex--;
+                        if (selectedGalleryIndex < 0) {
+                            selectedGalleryIndex = 0;
+                        }
+                    }
+                    
+                    if (pos.dy > 100) {  // Up
+                        selectedGalleryIndex -= THUMBNAILS_PER_ROW;
+                        if (selectedGalleryIndex < 0) {
+                            selectedGalleryIndex = 0;
+                        }
+                    } else if (pos.dy < -100) {  // Down
+                        selectedGalleryIndex += THUMBNAILS_PER_ROW;
+                        if (selectedGalleryIndex >= galleryImageCount) {
+                            selectedGalleryIndex = galleryImageCount - 1;
+                        }
+                    }
+                    
+                    // Auto-scroll
+                    int imagesPerScreen = THUMBNAILS_PER_ROW * 2;
+                    if (selectedGalleryIndex >= galleryScrollOffset + imagesPerScreen) {
+                        galleryScrollOffset = selectedGalleryIndex - imagesPerScreen + 1;
+                    } else if (selectedGalleryIndex < galleryScrollOffset) {
+                        galleryScrollOffset = selectedGalleryIndex;
+                    }
+                    
+                    circleDelay = 0;
+                }
+            } else {
+                circleDelay = 0;
+            }
+            
+            // A button loads selected image
+            if (kDown & KEY_A) {
+                if (loadDrawing(galleryImages[selectedGalleryIndex].filename)) {
+                    showGallery = false;
+                    allowDrawing = true;
+                    // Regenerate the rotated layer to match current mode
+                    generateRotatedCheckerboard(rotatedImage, 20);
+                }
+            }
+        }
+
+        // Only process game controls when not showing instructions or gallery
+        if (!showInstructions && !showGallery) {
             // X button: Clear canvas (reset to fully unscratched)
             if (kDown & KEY_X) {
                 pushUndo();  // Save current state before clearing
@@ -749,12 +1217,26 @@ int main(int argc, char **argv) {
             // Begin Citro3D frame for GPU rendering
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
             
-            // Render GPU-accelerated instruction screen to bottom
+            // Render GPU-accelerated instruction screen
             drawInstructionsGPU();
-        
             
             // End frame and display
             C3D_FrameEnd(0);
+        } else if (showGallery) {
+            // Render gallery to top screen using framebuffer
+            u8* fbTopLeft = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+            drawGallery(fbTopLeft);
+            
+            // Mirror to right eye for 3D (no parallax needed for menu)
+            u8* fbTopRight = gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
+            memcpy(fbTopRight, fbTopLeft, 240 * 400 * 3);
+            
+            // Render gallery instructions to bottom screen
+            u8* fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
+            drawGalleryInstructions(fbBottom);
+            
+            gfxFlushBuffers();
+            gfxSwapBuffers();
         } else {
             // Use traditional framebuffer rendering for game canvas
             // Step 1: Composite the two layers based on scratch mask
@@ -808,6 +1290,9 @@ int main(int argc, char **argv) {
         gspWaitForVBlank();  // Sync to 60fps
     }
 
+    // Cleanup gallery resources
+    freeGalleryImages();
+    
     // Cleanup logo resources
     if (logoLoaded) {
         C2D_SpriteSheetFree(spriteSheet);

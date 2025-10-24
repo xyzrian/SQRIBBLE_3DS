@@ -39,11 +39,16 @@ TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	include
+INCLUDES	:=	include 
+CFLAGS := -g -Wall -O2 -mword-relocations \
+		-ffunction-sections \
+		$(ARCH) $(INCLUDE) -I$(INCLUDES)
 GRAPHICS	:=	gfx
 GFXBUILD	:=	$(BUILD)
 ROMFS		:=	romfs
 #GFXBUILD	:=	$(ROMFS)/gfx
+
+
 
 #---------------------------------------------------------------------------------
 # options for code generation
