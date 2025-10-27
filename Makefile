@@ -34,6 +34,9 @@ include $(DEVKITARM)/3ds_rules
 APP_TITLE := SQRIBBLE 3DS
 APP_AUTHOR := soberdosing
 APP_DESCRIPTION  := 3D Drawing Application
+# CIA building options
+APP_PRODUCT_CODE := CTR-P-SQRB
+APP_UNIQUE_ID := 0xF8213
 ICON 		:= icon.png
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
@@ -46,7 +49,7 @@ CFLAGS := -g -Wall -O2 -mword-relocations \
 GRAPHICS	:=	gfx
 GFXBUILD	:=	$(BUILD)
 ROMFS		:=	romfs
-#GFXBUILD	:=	$(ROMFS)/gfx
+GFXBUILD	:=	$(ROMFS)/gfx
 
 
 
@@ -173,11 +176,23 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean
+.PHONY: all clean cia
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@3dsxtool $(OUTPUT).elf $(OUTPUT).3dsx --smdh=$(OUTPUT).smdh --romfs=$(ROMFS)
+
+cia: all
+	@echo "Building CIA..."
+	./makerom.exe -f cia -o SQRIBBLE_3DS.cia \
+		-elf SQRIBBLE_3DS.elf \
+		-rsf app.rsf \
+		-icon icon.icn \
+		-banner banner.bnr \
+		-romfs romfs \
+		-target t \
+		-exefslogo
 
 $(BUILD):
 	@mkdir -p $@
@@ -195,15 +210,8 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD)
-
-#---------------------------------------------------------------------------------
-$(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s
-#---------------------------------------------------------------------------------
-	@echo $(notdir $<)
-	@tex3ds -i $< -H $(BUILD)/$*.h -d $(DEPSDIR)/$*.d -o $(GFXBUILD)/$*.t3x
-
-#---------------------------------------------------------------------------------
+	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf
+	@rm -f $(TARGET).cia banner.bnr icon.icn
 else
 
 #---------------------------------------------------------------------------------
