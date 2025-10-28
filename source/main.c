@@ -275,15 +275,24 @@ bool loadDrawing(const char* filename) {
             int bmpIdx = ((239 - y) * 320 + x) * 3;  // BMP bottom-to-top
             int fbIdx = (x * 240 + (239 - y)) * 3;   // Framebuffer format
             
-            // Copy BGR data directly (BMP and 3DS both use BGR)
+            // Copy BGR data to BOTH layers so drawing reveals the same image
             baseImage[fbIdx + 0] = pixelData[bmpIdx + 0];  // B
             baseImage[fbIdx + 1] = pixelData[bmpIdx + 1];  // G
             baseImage[fbIdx + 2] = pixelData[bmpIdx + 2];  // R
+            
+            // KEY FIX: Copy to rotatedImage as well
+            rotatedImage[fbIdx + 0] = pixelData[bmpIdx + 0];  // B
+            rotatedImage[fbIdx + 1] = pixelData[bmpIdx + 1];  // G
+            rotatedImage[fbIdx + 2] = pixelData[bmpIdx + 2];  // R
         }
     }
     
     // Clear scratch mask to show loaded image
     memset(scratchMask, 255, sizeof(scratchMask));
+    
+    // Clear undo/redo stacks when loading new image
+    undoTop = 0;
+    redoTop = 0;
     
     free(pixelData);
     return true;
@@ -975,8 +984,9 @@ int main(int argc, char **argv) {
                 // If instructions are open, close them first
                 showInstructions = false;
             }
+            
+            // Toggle gallery state
             showGallery = !showGallery;
-            allowDrawing = !showInstructions && !showGallery;
             
             // Rescan gallery when opening
             if (showGallery) {
@@ -984,6 +994,9 @@ int main(int argc, char **argv) {
                 scanGalleryImages();
                 selectedGalleryIndex = 0;
                 galleryScrollOffset = 0;
+                allowDrawing = false;  // Explicitly disable drawing in gallery
+            } else {
+                allowDrawing = true;   // Re-enable drawing when closing gallery
             }
         }
 
@@ -993,6 +1006,7 @@ int main(int argc, char **argv) {
             allowDrawing = false;  // Don't allow drawing on the dismissal tap
         }
 
+        // Auto-enable drawing after dismissing instructions (but not during gallery)
         if (!showInstructions && !showGallery && !allowDrawing && !(kHeld & KEY_TOUCH)) {
             allowDrawing = true;
         }
